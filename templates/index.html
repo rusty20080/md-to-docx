@@ -1,0 +1,234 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markdown to Word Converter</title>
+    <style>
+        /* Vanilla CSS - no frameworks */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            color: #333;
+        }
+
+        .drop-area {
+            border: 2 dashed #ccc;
+            border-radius: 8px;
+            padding: 4rem 2rem;
+            text-align: center;
+            margin: 2rem 0;
+            transition: all 0.3s ease;
+            background-color: #f9f9f9;
+        }
+
+        .drop-area.active {
+            border-color: #2196F3;
+            background-color: #e3f2fd;
+        }
+
+        .btn {
+            background-color: #2196F3;
+            color: white;
+            padding: 0.8rem 1.5rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 1rem;
+            transition: background-color 0.3s;
+        }
+
+        .btn:hover {
+            background-color: #0b7dda;
+        }
+
+        .status {
+            margin: 2rem 0;
+            padding: 1rem;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .status.processing {
+            background-color: #fff3cd;
+            color: #856404;
+            display: block;
+        }
+
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            display: block;
+        }
+
+        .status.completed {
+            background-color: #d4edda;
+            color: #155724;
+            display: block;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        .download-btn {
+            margin-top: 1rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Markdown to Word Converter</h1>
+    
+    <div class="drop-area" id="dropArea">
+        <p>Drag and drop your Markdown file here, or click to select</p>
+        <input type="file" id="file-input" accept=".md">
+        <button class="btn" onclick="document.getElementById('file-input').click()">Select File</button>
+    </div>
+
+    <div class="status processing" id="processingStatus" style="display: none;">
+        <p><strong>Processing...</strong> Your file is being converted to Word format.</p>
+    </div>
+
+    <div class="status error" id="errorStatus" style="display: none;">
+        <p><strong>Error:</strong> <span id="errorMessage"></span></p>
+    </div>
+
+    <div class="status completed" id="completedStatus" style="display: none;">
+        <p><strong>Conversion Complete!</strong> Your document is ready to download.</p>
+        <a href="#" class="btn download-btn" id="downloadLink">Download Word Document</a>
+    </div>
+
+    <script>
+        // Global state object (single source of truth)
+        const appState = {
+            conversionStatus: 'idle',
+            errorMessage: ''
+        };
+
+        // DOM elements
+        const dropArea = document.getElementById('dropArea');
+        const fileInput = document.getElementById('file-input');
+        const processingStatus = document.getElementById('processingStatus');
+        const errorStatus = document.getElementById('errorStatus');
+        const completedStatus = document.getElementById('completedStatus');
+        const errorMessageEl = document.getElementById('errorMessage');
+        const downloadLink = document.getElementById('downloadLink');
+
+        // Drag and drop event handlers
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight() {
+            dropArea.classList.add('active');
+        }
+
+        function unhighlight() {
+            dropArea.classList.remove('active');
+        }
+
+        dropArea.addEventListener('drop', handleDrop, false);
+        
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length === 0) return;
+            
+            handleFiles(files[0]);
+        }
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                handleFiles(fileInput.files[0]);
+            }
+        });
+
+        async function handleFiles(file) {
+            // Validate file type from state logic (reused from backend)
+            const allowedExtensions = ['.md', '.markdown'];
+            const fileExt = file.name.toLowerCase().slice(Math.max(0, file.name.lastIndexOf('.')));
+            
+            if (!allowedExtensions.includes(fileExt)) {
+                updateStatus('error', 'Only .md or .markdown files are allowed');
+                return;
+            }
+
+            // Update state and UI
+            updateStatus('processing', 'Converting your file...');
+            
+            try {
+                const formData = new FormData();
+                formData.append('markdown_file', file);
+                
+                const response = await fetch('/convert', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (result.status === 'completed') {
+                    downloadLink.href = '/download/' + Date.now(); // Simple unique ID
+                    updateStatus('completed');
+                } else {
+                    updateStatus('error', result.error || 'Conversion failed');
+                }
+
+            } catch (error) {
+                updateStatus('error', `Server error: ${error.message}`);
+            }
+        }
+
+        function updateStatus(status, message = '') {
+            // Update global state first (single source of truth)
+            appState.conversionStatus = status;
+            
+            if (message) {
+                appState.errorMessage = message;
+            }
+
+            // Update UI based on state
+            processingStatus.style.display = 'none';
+            errorStatus.style.display = 'none';
+            completedStatus.style.display = 'none';
+            downloadLink.style.display = 'none';
+
+            switch (status) {
+                case 'processing':
+                    processingStatus.style.display = 'block';
+                    break;
+                case 'error':
+                    errorMessageEl.textContent = appState.errorMessage;
+                    errorStatus.style.display = 'block';
+                    break;
+                case 'completed':
+                    completedStatus.style.display = 'block';
+                    downloadLink.style.display = 'inline-block';
+                    break;
+            }
+        }
+
+        // Initialize with idle state
+        updateStatus('idle');
+    </script>
+</body>
+</html>
